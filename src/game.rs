@@ -1,9 +1,10 @@
+use glam::Vec3;
 use log::info;
 use wgpu::Color;
 use winit::event::MouseButton;
 
 use crate::{
-    renderer::{Drawer, Renderer, Vertex},
+    renderer::{Drawer, Renderer, Transform, Vertex},
     InputManager,
 };
 
@@ -71,20 +72,22 @@ impl Game {
     pub fn render(&self, drawer: &mut Drawer) {
         drawer.clear_slow(Color::BLACK);
         // stress test
-        for _ in 0..1500 {
-            if self.show_red {
-                drawer.draw_geometry_slow(
-                    &self.vertex_buffer_red,
-                    &self.index_buffer,
-                    self.num_indices,
-                );
-            } else {
-                drawer.draw_geometry_slow(
-                    &self.vertex_buffer_green,
-                    &self.index_buffer,
-                    self.num_indices,
-                );
-            }
+        if self.show_red {
+            let t = Transform::new();
+            drawer.draw_geometry_slow(
+                &self.vertex_buffer_red,
+                &self.index_buffer,
+                self.num_indices,
+                Some(&t),
+            );
+        } else {
+            let t = Transform::new().translate(Vec3::new(0.0, 0.5, 0.0));
+            drawer.draw_geometry_slow(
+                &self.vertex_buffer_green,
+                &self.index_buffer,
+                self.num_indices,
+                Some(&t),
+            );
         }
     }
 }

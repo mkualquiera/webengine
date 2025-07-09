@@ -1,3 +1,5 @@
+use glam::Vec3;
+use log::info;
 use std::{
     mem,
     sync::{Arc, Mutex},
@@ -47,6 +49,53 @@ pub struct Renderer {
     render_pipeline: RenderPipeline,
     transform_buffer: Buffer,
     transform_bind_group: BindGroup,
+}
+
+pub struct Transform {
+    matrix: glam::Mat4,
+    raw: [[f32; 4]; 4],
+}
+
+impl Transform {
+    pub fn new() -> Self {
+        let mat = glam::Mat4::IDENTITY;
+        Self {
+            matrix: mat,
+            raw: mat.to_cols_array_2d(),
+        }
+    }
+
+    pub fn translate(&self, translation: Vec3) -> Self {
+        let mat = self.matrix * glam::Mat4::from_translation(translation);
+        Self {
+            matrix: mat,
+            raw: mat.to_cols_array_2d(),
+        }
+    }
+
+    pub fn rotate(&self, angle: f32, axis: Vec3) -> Self {
+        let mat = self.matrix * glam::Mat4::from_axis_angle(axis, angle);
+        Self {
+            matrix: mat,
+            raw: mat.to_cols_array_2d(),
+        }
+    }
+
+    pub fn scale(&self, scale: Vec3) -> Self {
+        let mat = self.matrix * glam::Mat4::from_scale(scale);
+        Self {
+            matrix: mat,
+            raw: mat.to_cols_array_2d(),
+        }
+    }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        bytemuck::cast_slice(&self.raw)
+    }
+
+    pub fn write_buffer(&self, buffer: &Buffer, queue: &Queue) {
+        queue.write_buffer(buffer, 0, self.as_bytes());
+    }
 }
 
 pub struct Drawer<'a> {
@@ -138,7 +187,7 @@ impl Renderer {
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
-                bind_group_layouts: &[],
+                bind_group_layouts: &[&transform_bind_group_layout],
                 push_constant_ranges: &[],
             });
 
@@ -343,6 +392,10 @@ impl<'a> Drawer<'a> {
         }
     }
 
+    fn apply_transform(&mut self, transform: &Transform) {
+        transform.write_buffer(&self.renderer.transform_buffer, &self.renderer.queue);
+    }
+
     pub fn clear_slow(&mut self, color: Color) {
         let mut encoder =
             self.renderer
@@ -378,7 +431,11 @@ impl<'a> Drawer<'a> {
         vertex_buffer: &Buffer,
         index_buffer: &Buffer,
         num_indices: u32,
+        transform: Option<&Transform>,
     ) {
+        if let Some(t) = transform {
+            self.apply_transform(t);
+        }
         let mut encoder =
             self.renderer
                 .device
@@ -403,6 +460,7 @@ impl<'a> Drawer<'a> {
             });
 
             render_pass.set_pipeline(&self.renderer.render_pipeline);
+            render_pass.set_bind_group(0, &self.renderer.transform_bind_group, &[]);
             render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
             render_pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint16);
             render_pass.draw_indexed(0..num_indices, 0, 0..1);
