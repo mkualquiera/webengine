@@ -20,7 +20,7 @@ use winit::{
     window::{Window as WinitWindow, WindowId},
 };
 
-use crate::renderer::Renderer;
+use crate::renderer::RenderingSystem;
 
 #[wasm_bindgen(start)]
 pub fn main() {
@@ -40,24 +40,24 @@ async fn run() {
 enum AppState {
     Loading {
         game: Arc<Mutex<Option<Game>>>,
-        renderer: Arc<Mutex<Option<Renderer>>>,
+        renderer: Arc<Mutex<Option<RenderingSystem>>>,
         window: Arc<Mutex<Option<Arc<WinitWindow>>>>,
     },
     Loaded {
         game: Game,
-        renderer: Renderer,
+        renderer: RenderingSystem,
         window: Arc<WinitWindow>,
-        input: InputManager,
+        input: InputSystem,
     },
 }
 
 #[derive(Default)]
-struct InputManager {
+struct InputSystem {
     mouse_position: (f64, f64),
     mouse_buttons: HashMap<MouseButton, ElementState>,
 }
 
-impl InputManager {
+impl InputSystem {
     fn is_mouse_down(&self, button: MouseButton) -> bool {
         matches!(self.mouse_buttons.get(&button), Some(ElementState::Pressed))
     }
@@ -102,7 +102,7 @@ impl AppState {
                         game,
                         renderer,
                         window,
-                        input: InputManager::default(),
+                        input: InputSystem::default(),
                     };
                     true
                 } else {
@@ -175,7 +175,7 @@ impl ApplicationHandler for WebApp {
             let renderer_clone = Arc::clone(renderer);
             let game_clone = Arc::clone(game);
             wasm_bindgen_futures::spawn_local(async move {
-                let mut renderer = Renderer::new(window.clone(), 800, 600).await;
+                let mut renderer = RenderingSystem::new(window.clone(), 800, 600).await;
                 let game = Game::init(&mut renderer);
 
                 *renderer_clone.lock().unwrap() = Some(renderer);

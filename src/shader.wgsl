@@ -23,7 +23,14 @@ fn vs_main(model: VertexInput) -> VertexOutput {
     return out;
 }
 
+struct EngineColor {
+    color: vec4<f32>,
+}
+
+@group(1) @binding(1)
+var<uniform> engine_color: EngineColor;
+
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    return vec4<f32>(in.color, 1.0);
+    return vec4<f32>(in.color, 1.0) * engine_color.color;
 }

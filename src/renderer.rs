@@ -1,4 +1,4 @@
-use glam::Vec3;
+use glam::{Mat4, Vec3};
 use log::info;
 use std::{
     mem,
@@ -40,15 +40,36 @@ impl Vertex {
     }
 }
 
-pub struct Renderer {
+#[repr(C)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+/// Represents a color in RGBA format.
+pub struct EngineColor {
+    pub r: f32,
+    pub g: f32,
+    pub b: f32,
+    pub a: f32,
+}
+
+pub struct RenderingSystem {
     surface: Surface<'static>,
     device: Device,
     queue: Queue,
     config: SurfaceConfiguration,
     size: winit::dpi::PhysicalSize<u32>,
     render_pipeline: RenderPipeline,
+
+    // For transforms:
     transform_buffer: Buffer,
     transform_bind_group: BindGroup,
+    ortogaphic_transform: Transform,
+
+    // For pre-baked geometry:
+    square_vertex_buffer: Buffer,
+    square_index_buffer: Buffer,
+
+    // For uniform color
+    color_buffer: Buffer,
+    color_bind_group: BindGroup,
 }
 
 pub struct Transform {
@@ -63,6 +84,11 @@ impl Transform {
             matrix: mat,
             raw: mat.to_cols_array_2d(),
         }
+    }
+
+    pub fn from_matrix(matrix: glam::Mat4) -> Self {
+        let raw = matrix.to_cols_array_2d();
+        Self { matrix, raw }
     }
 
     pub fn translate(&self, translation: Vec3) -> Self {
@@ -100,12 +126,13 @@ impl Transform {
 
 pub struct Drawer<'a> {
     //pass: RenderPass<'a>,
-    renderer: &'a Renderer,
+    renderer: &'a RenderingSystem,
     view: &'a TextureView,
     command_buffers: Vec<CommandBuffer>,
+    pub ortho: &'a Transform,
 }
 
-impl Renderer {
+impl RenderingSystem {
     pub async fn new(window: Arc<Window>, width: u32, height: u32) -> Self {
         let size = winit::dpi::PhysicalSize::new(width, height);
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
@@ -184,10 +211,32 @@ impl Renderer {
                 }],
             });
 
+        let color_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Color Buffer"),
+            size: mem::size_of::<EngineColor>() as u64, // 4 bytes for RGBA
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let color_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Color Bind Group Layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
-                bind_group_layouts: &[&transform_bind_group_layout],
+                bind_group_layouts: &[&transform_bind_group_layout, &color_bind_group_layout],
                 push_constant_ranges: &[],
             });
 
@@ -242,6 +291,52 @@ impl Renderer {
             }],
         });
 
+        let color_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Color Bind Group"),
+            layout: &color_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer: &color_buffer,
+                    offset: 0,
+                    size: None,
+                }),
+            }],
+        });
+
+        let ortogaphic_transform = Transform::from_matrix(Mat4::orthographic_rh(
+            0.0,
+            width as f32,
+            height as f32,
+            0.0,
+            -100.0,
+            100.0,
+        ));
+
+        let square_vertices = [
+            Vertex {
+                position: [0.0, 0.0, 0.0],
+                color: [1.0, 0.0, 0.0],
+            }, // Top Left
+            Vertex {
+                position: [0.0, 1.0, 0.0],
+                color: [1.0, 1.0, 0.0],
+            }, // Bottom Left
+            Vertex {
+                position: [1.0, 1.0, 0.0],
+                color: [1.0, 1.0, 1.0],
+            }, // Bottom Right
+            Vertex {
+                position: [1.0, 0.0, 0.0],
+                color: [1.0, 1.0, 1.0],
+            }, // Top Right
+        ];
+
+        let square_indices: &[u16] = &[0, 1, 2, 3, 0, 2];
+
+        let square_vertex_buffer = Self::create_vertex_buffer_internal(&device, &square_vertices);
+        let square_index_buffer = Self::create_index_buffer_internal(&device, square_indices);
+
         Self {
             surface,
             device,
@@ -251,6 +346,11 @@ impl Renderer {
             render_pipeline,
             transform_buffer,
             transform_bind_group,
+            ortogaphic_transform,
+            square_vertex_buffer,
+            square_index_buffer,
+            color_buffer,
+            color_bind_group,
         }
     }
 
@@ -260,6 +360,14 @@ impl Renderer {
             self.config.width = new_size.width.max(1);
             self.config.height = new_size.height.max(1);
             self.surface.configure(&self.device, &self.config);
+            self.ortogaphic_transform = Transform::from_matrix(Mat4::orthographic_rh(
+                0.0,
+                new_size.width as f32,
+                new_size.height as f32,
+                0.0,
+                -100.0,
+                100.0,
+            ));
         }
     }
 
@@ -267,12 +375,12 @@ impl Renderer {
         self.resize(self.size);
     }
 
-    pub fn create_vertex_buffer(&self, vertices: &[Vertex]) -> wgpu::Buffer {
+    pub fn create_vertex_buffer_internal(device: &Device, vertices: &[Vertex]) -> wgpu::Buffer {
         let align = wgpu::COPY_BUFFER_ALIGNMENT as u64;
         let vertex_size = (vertices.len() * std::mem::size_of::<Vertex>()) as u64;
         let aligned_vertex_size = (vertex_size + align - 1) & !(align - 1);
 
-        let vertex_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+        let vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Vertex Buffer"),
             size: aligned_vertex_size,
             usage: wgpu::BufferUsages::VERTEX,
@@ -289,12 +397,16 @@ impl Renderer {
         vertex_buffer
     }
 
-    pub fn create_index_buffer(&self, indices: &[u16]) -> wgpu::Buffer {
+    pub fn create_vertex_buffer(&self, vertices: &[Vertex]) -> wgpu::Buffer {
+        Self::create_vertex_buffer_internal(&self.device, vertices)
+    }
+
+    pub fn create_index_buffer_internal(device: &Device, indices: &[u16]) -> wgpu::Buffer {
         let align = wgpu::COPY_BUFFER_ALIGNMENT as u64;
         let index_size = (indices.len() * std::mem::size_of::<u16>()) as u64;
         let aligned_index_size = (index_size + align - 1) & !(align - 1);
 
-        let index_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+        let index_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Index Buffer"),
             size: aligned_index_size,
             usage: wgpu::BufferUsages::INDEX,
@@ -309,6 +421,10 @@ impl Renderer {
         index_buffer.unmap();
 
         index_buffer
+    }
+
+    pub fn create_index_buffer(&self, indices: &[u16]) -> wgpu::Buffer {
+        Self::create_index_buffer_internal(&self.device, indices)
     }
 
     pub fn render(&mut self, game: &Game) -> Result<(), wgpu::SurfaceError> {
@@ -384,11 +500,12 @@ impl<'a> Drawer<'a> {
     //    self.pass.draw_indexed(0..num_indices, 0, 0..1);
     //}
 
-    pub fn new(renderer: &'a Renderer, view: &'a TextureView) -> Self {
+    pub fn new(renderer: &'a RenderingSystem, view: &'a TextureView) -> Self {
         Self {
             renderer,
             view,
             command_buffers: Vec::new(),
+            ortho: &renderer.ortogaphic_transform,
         }
     }
 
@@ -426,15 +543,36 @@ impl<'a> Drawer<'a> {
         self.command_buffers.push(encoder.finish());
     }
 
+    pub fn set_color(&mut self, color: EngineColor) {
+        self.renderer.queue.write_buffer(
+            &self.renderer.color_buffer,
+            0,
+            bytemuck::cast_slice(&[color]),
+        );
+    }
+
     pub fn draw_geometry_slow(
         &mut self,
         vertex_buffer: &Buffer,
         index_buffer: &Buffer,
         num_indices: u32,
         transform: Option<&Transform>,
+        color: Option<&EngineColor>,
     ) {
         if let Some(t) = transform {
             self.apply_transform(t);
+        } else {
+            self.apply_transform(self.ortho);
+        }
+        if let Some(c) = color {
+            self.set_color(*c);
+        } else {
+            self.set_color(EngineColor {
+                r: 1.0,
+                g: 1.0,
+                b: 1.0,
+                a: 1.0,
+            });
         }
         let mut encoder =
             self.renderer
@@ -461,6 +599,7 @@ impl<'a> Drawer<'a> {
 
             render_pass.set_pipeline(&self.renderer.render_pipeline);
             render_pass.set_bind_group(0, &self.renderer.transform_bind_group, &[]);
+            render_pass.set_bind_group(1, &self.renderer.color_bind_group, &[]);
             render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
             render_pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint16);
             render_pass.draw_indexed(0..num_indices, 0, 0..1);
