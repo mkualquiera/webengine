@@ -50,6 +50,39 @@ pub struct EngineColor {
     pub a: f32,
 }
 
+impl EngineColor {
+    pub const WHITE: Self = Self {
+        r: 1.0,
+        g: 1.0,
+        b: 1.0,
+        a: 1.0,
+    };
+    pub const BLACK: Self = Self {
+        r: 0.0,
+        g: 0.0,
+        b: 0.0,
+        a: 1.0,
+    };
+    pub const RED: Self = Self {
+        r: 1.0,
+        g: 0.0,
+        b: 0.0,
+        a: 1.0,
+    };
+    pub const GREEN: Self = Self {
+        r: 0.0,
+        g: 1.0,
+        b: 0.0,
+        a: 1.0,
+    };
+    pub const BLUE: Self = Self {
+        r: 0.0,
+        g: 0.0,
+        b: 1.0,
+        a: 1.0,
+    };
+}
+
 pub struct RenderingSystem {
     surface: Surface<'static>,
     device: Device,
@@ -316,11 +349,11 @@ impl RenderingSystem {
         let square_vertices = [
             Vertex {
                 position: [0.0, 0.0, 0.0],
-                color: [1.0, 0.0, 0.0],
+                color: [1.0, 1.0, 1.0],
             }, // Top Left
             Vertex {
                 position: [0.0, 1.0, 0.0],
-                color: [1.0, 1.0, 0.0],
+                color: [1.0, 1.0, 1.0],
             }, // Bottom Left
             Vertex {
                 position: [1.0, 1.0, 0.0],
@@ -478,7 +511,7 @@ impl RenderingSystem {
 
         game.render(&mut drawer);
 
-        drawer.finish();
+        drawer.flush();
 
         //self.queue.submit(std::iter::once(encoder.finish()));
         output.present();
@@ -510,6 +543,8 @@ impl<'a> Drawer<'a> {
     }
 
     fn apply_transform(&mut self, transform: &Transform) {
+        // we need to flush or else it will be out of order
+        self.flush();
         transform.write_buffer(&self.renderer.transform_buffer, &self.renderer.queue);
     }
 
@@ -544,6 +579,7 @@ impl<'a> Drawer<'a> {
     }
 
     pub fn set_color(&mut self, color: EngineColor) {
+        self.flush();
         self.renderer.queue.write_buffer(
             &self.renderer.color_buffer,
             0,
@@ -610,11 +646,22 @@ impl<'a> Drawer<'a> {
         self.command_buffers.push(encoder.finish());
     }
 
-    pub fn finish(&mut self) {
+    pub fn draw_square_slow(&mut self, transform: Option<&Transform>, color: Option<&EngineColor>) {
+        self.draw_geometry_slow(
+            &self.renderer.square_vertex_buffer,
+            &self.renderer.square_index_buffer,
+            6, // 6 indices for the square
+            transform,
+            color,
+        );
+    }
+
+    pub fn flush(&mut self) {
         if !self.command_buffers.is_empty() {
             self.renderer
                 .queue
                 .submit(mem::take(&mut self.command_buffers));
+            self.command_buffers.clear();
         }
     }
 }
