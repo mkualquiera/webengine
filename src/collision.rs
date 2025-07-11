@@ -1,9 +1,10 @@
 use glam::Vec3;
+use log::info;
 
 use crate::geometry::Transform;
 
 #[derive(Debug, Clone)]
-pub struct CollisionInfo {
+pub struct Collision {
     // Vertices of space A that are inside space B
     pub my_vertices_inside: VertexCollision,
 
@@ -88,7 +89,7 @@ impl EdgeCollision {
     }
 }
 
-impl CollisionInfo {
+impl Collision {
     pub fn new() -> Self {
         Self {
             my_vertices_inside: VertexCollision::new(),
@@ -108,8 +109,8 @@ impl CollisionInfo {
             || self.i_am_inside_other
     }
 
-    pub fn do_spaces_collide(a: &Transform, b: &Transform) -> Option<CollisionInfo> {
-        let mut collision_info = CollisionInfo::new();
+    pub fn do_spaces_collide(a: &Transform, b: &Transform) -> Option<Collision> {
+        let mut collision_info = Collision::new();
 
         // Check vertices of A inside B
         collision_info.my_vertices_inside = Self::check_vertices_in_space(a, b);

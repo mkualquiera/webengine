@@ -67,7 +67,7 @@ impl Transform {
     }
 
     pub fn map_towards(&self, other: &Self) -> Self {
-        let mat = other.matrix * self.matrix.inverse();
+        let mat = other.matrix.inverse() * self.matrix;
         Self {
             matrix: mat,
             raw: mat.to_cols_array_2d(),
