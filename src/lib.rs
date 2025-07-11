@@ -1,4 +1,6 @@
+mod collision;
 mod game;
+mod geometry;
 mod renderer;
 
 use core::panic;
@@ -10,7 +12,8 @@ use std::sync::Arc;
 use std::{cell::RefCell, sync::Mutex};
 use wasm_bindgen::prelude::*;
 use web_sys::{HtmlCanvasElement, Window};
-use winit::event::{ElementState, MouseButton};
+use winit::event::{ElementState, KeyEvent, MouseButton};
+use winit::keyboard::{Key, KeyCode, PhysicalKey};
 use winit::window;
 use winit::{
     application::ApplicationHandler,
@@ -55,6 +58,7 @@ enum AppState {
 struct InputSystem {
     mouse_position: (f64, f64),
     mouse_buttons: HashMap<MouseButton, ElementState>,
+    physical_key_states: HashMap<KeyCode, ElementState>,
 }
 
 impl InputSystem {
@@ -62,10 +66,24 @@ impl InputSystem {
         matches!(self.mouse_buttons.get(&button), Some(ElementState::Pressed))
     }
     fn is_mouse_up(&self, button: MouseButton) -> bool {
+        match self.mouse_buttons.get(&button) {
+            Some(ElementState::Pressed) => false,
+            Some(ElementState::Released) => true,
+            None => false,
+        }
+    }
+    fn is_physical_key_down(&self, key: KeyCode) -> bool {
         matches!(
-            self.mouse_buttons.get(&button),
-            Some(ElementState::Released)
+            self.physical_key_states.get(&key),
+            Some(ElementState::Pressed)
         )
+    }
+    fn is_physical_key_up(&self, key: KeyCode) -> bool {
+        match self.physical_key_states.get(&key) {
+            Some(ElementState::Pressed) => false,
+            Some(ElementState::Released) => true,
+            None => false,
+        }
     }
 }
 
@@ -253,6 +271,17 @@ impl ApplicationHandler for WebApp {
                 WindowEvent::CursorMoved { position, .. } => {
                     // Update mouse position
                     input.mouse_position = (position.x, position.y);
+                }
+                WindowEvent::KeyboardInput { event, .. } => {
+                    // Handle keyboard input if needed
+                    let KeyEvent {
+                        physical_key,
+                        state,
+                        ..
+                    } = event;
+                    if let PhysicalKey::Code(code) = physical_key {
+                        input.physical_key_states.insert(code, state);
+                    }
                 }
                 _ => {}
             }

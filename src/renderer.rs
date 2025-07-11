@@ -10,7 +10,7 @@ use wgpu::{
 };
 use winit::window::Window;
 
-use crate::game::Game;
+use crate::{game::Game, geometry::Transform};
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -94,7 +94,7 @@ pub struct RenderingSystem {
     // For transforms:
     transform_buffer: Buffer,
     transform_bind_group: BindGroup,
-    ortogaphic_transform: Transform,
+    ortographic_transform: Transform,
 
     // For pre-baked geometry:
     square_vertex_buffer: Buffer,
@@ -105,61 +105,9 @@ pub struct RenderingSystem {
     color_bind_group: BindGroup,
 }
 
-pub struct Transform {
-    matrix: glam::Mat4,
-    raw: [[f32; 4]; 4],
-}
-
-impl Transform {
-    pub fn new() -> Self {
-        let mat = glam::Mat4::IDENTITY;
-        Self {
-            matrix: mat,
-            raw: mat.to_cols_array_2d(),
-        }
-    }
-
-    pub fn from_matrix(matrix: glam::Mat4) -> Self {
-        let raw = matrix.to_cols_array_2d();
-        Self { matrix, raw }
-    }
-
-    pub fn translate(&self, translation: Vec3) -> Self {
-        let mat = self.matrix * glam::Mat4::from_translation(translation);
-        Self {
-            matrix: mat,
-            raw: mat.to_cols_array_2d(),
-        }
-    }
-
-    pub fn rotate(&self, angle: f32, axis: Vec3) -> Self {
-        let mat = self.matrix * glam::Mat4::from_axis_angle(axis, angle);
-        Self {
-            matrix: mat,
-            raw: mat.to_cols_array_2d(),
-        }
-    }
-
-    pub fn scale(&self, scale: Vec3) -> Self {
-        let mat = self.matrix * glam::Mat4::from_scale(scale);
-        Self {
-            matrix: mat,
-            raw: mat.to_cols_array_2d(),
-        }
-    }
-
-    pub fn as_bytes(&self) -> &[u8] {
-        bytemuck::cast_slice(&self.raw)
-    }
-
-    pub fn write_buffer(&self, buffer: &Buffer, queue: &Queue) {
-        queue.write_buffer(buffer, 0, self.as_bytes());
-    }
-}
-
 pub struct Drawer<'a> {
     //pass: RenderPass<'a>,
-    renderer: &'a RenderingSystem,
+    pub renderer: &'a RenderingSystem,
     view: &'a TextureView,
     command_buffers: Vec<CommandBuffer>,
     pub ortho: &'a Transform,
@@ -337,7 +285,7 @@ impl RenderingSystem {
             }],
         });
 
-        let ortogaphic_transform = Transform::from_matrix(Mat4::orthographic_rh(
+        let ortographic_transform = Transform::from_matrix(Mat4::orthographic_rh(
             0.0,
             width as f32,
             height as f32,
@@ -345,6 +293,9 @@ impl RenderingSystem {
             -100.0,
             100.0,
         ));
+
+        let ortographic_size_invariant_transform =
+            Transform::from_matrix(Mat4::orthographic_rh(0.0, 1.0, 1.0, 0.0, -100.0, 100.0));
 
         let square_vertices = [
             Vertex {
@@ -379,7 +330,7 @@ impl RenderingSystem {
             render_pipeline,
             transform_buffer,
             transform_bind_group,
-            ortogaphic_transform,
+            ortographic_transform,
             square_vertex_buffer,
             square_index_buffer,
             color_buffer,
@@ -393,7 +344,7 @@ impl RenderingSystem {
             self.config.width = new_size.width.max(1);
             self.config.height = new_size.height.max(1);
             self.surface.configure(&self.device, &self.config);
-            self.ortogaphic_transform = Transform::from_matrix(Mat4::orthographic_rh(
+            self.ortographic_transform = Transform::from_matrix(Mat4::orthographic_rh(
                 0.0,
                 new_size.width as f32,
                 new_size.height as f32,
@@ -538,7 +489,7 @@ impl<'a> Drawer<'a> {
             renderer,
             view,
             command_buffers: Vec::new(),
-            ortho: &renderer.ortogaphic_transform,
+            ortho: &renderer.ortographic_transform,
         }
     }
 
