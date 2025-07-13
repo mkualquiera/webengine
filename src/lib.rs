@@ -1,3 +1,4 @@
+mod audio;
 mod collision;
 mod game;
 mod geometry;
@@ -23,6 +24,7 @@ use winit::{
     window::{Window as WinitWindow, WindowId},
 };
 
+use crate::audio::AudioSystem;
 use crate::renderer::RenderingSystem;
 
 #[wasm_bindgen(start)]
@@ -45,12 +47,14 @@ enum AppState {
         game: Arc<Mutex<Option<Game>>>,
         renderer: Arc<Mutex<Option<RenderingSystem>>>,
         window: Arc<Mutex<Option<Arc<WinitWindow>>>>,
+        audio: Arc<Mutex<Option<AudioSystem>>>,
     },
     Loaded {
         game: Game,
         renderer: RenderingSystem,
         window: Arc<WinitWindow>,
         input: InputSystem,
+        audio: AudioSystem,
     },
 }
 
@@ -103,17 +107,20 @@ impl AppState {
                 game,
                 renderer,
                 window,
+                audio,
             } => {
                 // Check if all components are ready
                 let renderer_ready = renderer.lock().unwrap().is_some();
                 let game_ready = game.lock().unwrap().is_some();
                 let window_ready = window.lock().unwrap().is_some();
+                let audio_ready = audio.lock().unwrap().is_some();
 
-                if renderer_ready && game_ready && window_ready {
+                if renderer_ready && game_ready && window_ready && audio_ready {
                     // Take the values out
                     let renderer = renderer.lock().unwrap().take().unwrap();
                     let game = game.lock().unwrap().take().unwrap();
                     let window = window.lock().unwrap().take().unwrap();
+                    let audio = audio.lock().unwrap().take().unwrap();
 
                     // Replace self with the new state
                     *self = AppState::Loaded {
@@ -121,6 +128,7 @@ impl AppState {
                         renderer,
                         window,
                         input: InputSystem::default(),
+                        audio: audio,
                     };
                     true
                 } else {
@@ -144,6 +152,7 @@ impl WebApp {
                 game: Arc::new(Mutex::new(None)),
                 renderer: Arc::new(Mutex::new(None)),
                 window: Arc::new(Mutex::new(None)),
+                audio: Arc::new(Mutex::new(None)),
             }),
             last_time: None,
         }
@@ -185,6 +194,7 @@ impl ApplicationHandler for WebApp {
             game,
             renderer,
             window: window_state,
+            audio,
         } = &mut *self.state
         {
             // Store the window in the state
@@ -192,12 +202,15 @@ impl ApplicationHandler for WebApp {
 
             let renderer_clone = Arc::clone(renderer);
             let game_clone = Arc::clone(game);
+            let audio_clone = Arc::clone(audio);
             wasm_bindgen_futures::spawn_local(async move {
                 let mut renderer = RenderingSystem::new(window.clone(), 800, 600).await;
-                let game = Game::init(&mut renderer);
+                let mut audio_system = AudioSystem::new();
+                let game = Game::init(&mut renderer, &mut audio_system);
 
                 *renderer_clone.lock().unwrap() = Some(renderer);
                 *game_clone.lock().unwrap() = Some(game);
+                *audio_clone.lock().unwrap() = Some(audio_system);
             });
         } else {
             panic!("AppState is not Loading");
@@ -219,6 +232,7 @@ impl ApplicationHandler for WebApp {
             renderer,
             window,
             input,
+            audio,
         } = &mut *self.state
         {
             match event {
@@ -240,18 +254,9 @@ impl ApplicationHandler for WebApp {
                     // Only call update if we have a last time
                     if let Some(last_time) = self.last_time {
                         let delta_time = (now - last_time) as f32 / 1000.0; // Convert to seconds
-                        game.update(input, delta_time);
+                        game.update(input, audio, delta_time);
                     }
                     self.last_time = Some(now);
-
-                    //match game.render(renderer) {
-                    //    Ok(_) => {}
-                    //    Err(wgpu::SurfaceError::Lost) => {
-                    //        renderer.canonical_resize();
-                    //    }
-                    //    Err(wgpu::SurfaceError::OutOfMemory) => event_loop.exit(),
-                    //    Err(e) => log::error!("{:?}", e),
-                    //}
 
                     match renderer.render(game) {
                         Ok(_) => {}
@@ -267,6 +272,7 @@ impl ApplicationHandler for WebApp {
                 WindowEvent::MouseInput { button, state, .. } => {
                     // Update mouse input state
                     input.mouse_buttons.insert(button, state);
+                    audio.on_user_interaction();
                 }
                 WindowEvent::CursorMoved { position, .. } => {
                     // Update mouse position
@@ -282,6 +288,7 @@ impl ApplicationHandler for WebApp {
                     if let PhysicalKey::Code(code) = physical_key {
                         input.physical_key_states.insert(code, state);
                     }
+                    audio.on_user_interaction();
                 }
                 _ => {}
             }

@@ -7,6 +7,7 @@ use winit::{
 };
 
 use crate::{
+    audio::{AudioHandle, AudioSystem},
     collision::Collision,
     geometry::Transform,
     renderer::{Drawer, EngineColor, RenderingSystem},
@@ -15,11 +16,15 @@ use crate::{
 
 struct PaddleState {
     position: f32,
+    last_velocity: f32,
 }
 
 impl Default for PaddleState {
     fn default() -> Self {
-        Self { position: 0.5 }
+        Self {
+            position: 0.5,
+            last_velocity: 0.0,
+        }
     }
 }
 
@@ -64,13 +69,20 @@ impl PaddleState {
         self.position -= PaddleState::PADDLE_SPEED * delta_time;
         if self.position < 0.0 {
             self.position = 0.0;
+        } else {
+            self.last_velocity = -PaddleState::PADDLE_SPEED;
         }
     }
     pub fn move_right(&mut self, delta_time: f32) {
         self.position += PaddleState::PADDLE_SPEED * delta_time;
         if self.position > 1.0 {
             self.position = 1.0;
+        } else {
+            self.last_velocity = PaddleState::PADDLE_SPEED;
         }
+    }
+    pub fn reset_velocity(&mut self) {
+        self.last_velocity = 0.0;
     }
 }
 
@@ -89,6 +101,9 @@ impl DualPaddleState {
     }
 
     pub fn move_paddles(&mut self, input: &InputSystem, delta_time: f32) {
+        self.player_a.reset_velocity();
+        self.player_b.reset_velocity();
+
         if input.is_physical_key_down(KeyCode::KeyA) {
             self.player_a.move_left(delta_time);
         }
@@ -113,14 +128,33 @@ impl Ball {
     const RADIUS: f32 = 0.05; // Radius in normalized units
     const BALL_SPEED: f32 = 0.5; // Speed in normalized units
 
-    pub fn update(&mut self, delta_time: f32, paddles: &DualPaddleState, ortho_si: &Transform) {
+    pub fn update(
+        &mut self,
+        delta_time: f32,
+        paddles: &DualPaddleState,
+        ortho_si: &Transform,
+        bounce_sound: &AudioHandle,
+        wall_sound: &AudioHandle,
+        audio_system: &mut AudioSystem,
+    ) {
+        // At every update, convert some percentage of x velocity into y velocity
+        let amount = self.velocity.x * 0.3 * delta_time;
+        self.velocity.x -= amount;
+        if self.velocity.y > 0.0 {
+            self.velocity.y += amount;
+        } else {
+            self.velocity.y -= amount;
+        }
+        self.velocity = self.velocity.normalize() * Ball::BALL_SPEED; // Normalize speed
         self.position += self.velocity * delta_time;
         if self.position.x < 0.0 {
             self.position.x = 0.0;
             self.velocity.x = -self.velocity.x; // Bounce off left wall
+            audio_system.play(wall_sound, self.velocity.dot(Vec2::X).abs() + 0.5);
         } else if self.position.x > (1.0 - Self::RADIUS) {
             self.position.x = 1.0 - Self::RADIUS;
             self.velocity.x = -self.velocity.x; // Bounce off right wall
+            audio_system.play(wall_sound, self.velocity.dot(Vec2::X).abs() + 0.5);
         }
         if self.position.y < 0.0 {
             self.position.y = 0.0;
@@ -136,6 +170,14 @@ impl Ball {
         .is_some()
         {
             self.velocity.y = -self.velocity.y; // Bounce off player A paddle
+            let previous_velocity = self.velocity.clone();
+            self.velocity.x += paddles.player_a.last_velocity * 2.0; // Add paddle velocity
+            self.velocity = self.velocity.normalize() * Ball::BALL_SPEED; // Normalize speed
+            self.position.y = PaddleState::PADDLE_HEIGHT;
+            audio_system.play(
+                bounce_sound,
+                previous_velocity.dot(self.velocity).abs() + 0.5,
+            );
         } else if Collision::do_spaces_collide(
             &self.local_space(ortho_si),
             &paddles.player_b.local_space(ortho_si, false),
@@ -143,6 +185,14 @@ impl Ball {
         .is_some()
         {
             self.velocity.y = -self.velocity.y; // Bounce off player B paddle
+            let previous_velocity = self.velocity.clone();
+            self.velocity.x += paddles.player_b.last_velocity * 2.0; // Add paddle velocity
+            self.velocity = self.velocity.normalize() * Ball::BALL_SPEED; // Normalize speed
+            self.position.y = 1.0 - PaddleState::PADDLE_HEIGHT - Ball::RADIUS;
+            audio_system.play(
+                bounce_sound,
+                previous_velocity.dot(self.velocity).abs() + 0.5,
+            );
         } else {
             // Check if the ball is inside the goal area of either player
             if Collision::do_spaces_collide(
@@ -191,22 +241,29 @@ impl Default for Ball {
 pub struct Game {
     paddles: DualPaddleState,
     ball: Ball,
+    bouce_sound: AudioHandle,
+    wall_sound: AudioHandle,
 }
 
 impl Game {
-    pub fn init(rendering_system: &mut RenderingSystem) -> Self {
+    pub fn init(rendering_system: &mut RenderingSystem, audio_system: &mut AudioSystem) -> Self {
         Self {
             paddles: DualPaddleState::default(),
             ball: Ball::default(),
+            bouce_sound: audio_system.load_buffer(include_bytes!("assets/bounce_1.wav")),
+            wall_sound: audio_system.load_buffer(include_bytes!("assets/wall_1.wav")),
         }
     }
 
-    pub fn update(&mut self, input: &InputSystem, delta_time: f32) {
+    pub fn update(&mut self, input: &InputSystem, audio_system: &mut AudioSystem, delta_time: f32) {
         self.paddles.move_paddles(input, delta_time);
         self.ball.update(
             delta_time,
             &self.paddles,
             &Transform::ortographic_size_invariant(),
+            &self.bouce_sound,
+            &self.wall_sound,
+            audio_system,
         );
     }
 
