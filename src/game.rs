@@ -1,10 +1,7 @@
 use glam::{Vec2, Vec3};
 use log::info;
 use wgpu::Color;
-use winit::{
-    event::MouseButton,
-    keyboard::{Key, KeyCode, PhysicalKey},
-};
+use winit::keyboard::KeyCode;
 
 use crate::{
     audio::{AudioHandle, AudioSystem},
@@ -170,7 +167,7 @@ impl Ball {
         .is_some()
         {
             self.velocity.y = -self.velocity.y; // Bounce off player A paddle
-            let previous_velocity = self.velocity.clone();
+            let previous_velocity = self.velocity;
             self.velocity.x += paddles.player_a.last_velocity * 2.0; // Add paddle velocity
             self.velocity = self.velocity.normalize() * Ball::BALL_SPEED; // Normalize speed
             self.position.y = PaddleState::PADDLE_HEIGHT;
@@ -185,7 +182,7 @@ impl Ball {
         .is_some()
         {
             self.velocity.y = -self.velocity.y; // Bounce off player B paddle
-            let previous_velocity = self.velocity.clone();
+            let previous_velocity = self.velocity;
             self.velocity.x += paddles.player_b.last_velocity * 2.0; // Add paddle velocity
             self.velocity = self.velocity.normalize() * Ball::BALL_SPEED; // Normalize speed
             self.position.y = 1.0 - PaddleState::PADDLE_HEIGHT - Ball::RADIUS;
@@ -246,6 +243,10 @@ pub struct Game {
 }
 
 impl Game {
+    pub fn target_size() -> (u32, u32) {
+        (320, 240)
+    }
+
     pub fn init(rendering_system: &mut RenderingSystem, audio_system: &mut AudioSystem) -> Self {
         Self {
             paddles: DualPaddleState::default(),

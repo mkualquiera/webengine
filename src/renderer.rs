@@ -96,6 +96,8 @@ pub struct RenderingSystem {
     config: SurfaceConfiguration,
     size: winit::dpi::PhysicalSize<u32>,
     render_pipeline: RenderPipeline,
+    target_aspect_ratio: f32,
+    original_size: winit::dpi::PhysicalSize<u32>,
 
     // For transforms:
     transform_buffer: Buffer,
@@ -121,6 +123,7 @@ pub struct Drawer<'a> {
 
 impl RenderingSystem {
     pub async fn new(window: Arc<Window>, width: u32, height: u32) -> Self {
+        let target_aspect_ratio = width as f32 / height as f32;
         let size = winit::dpi::PhysicalSize::new(width, height);
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends: wgpu::Backends::GL,
@@ -341,23 +344,29 @@ impl RenderingSystem {
             square_index_buffer,
             color_buffer,
             color_bind_group,
+            target_aspect_ratio,
+            original_size: size,
         }
     }
 
     pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
         if new_size.width > 0 && new_size.height > 0 {
-            self.size = new_size;
-            self.config.width = new_size.width.max(1);
-            self.config.height = new_size.height.max(1);
+            let new_aspect_ratio = new_size.width as f32 / new_size.height as f32;
+            let (width, height) = if new_aspect_ratio > self.target_aspect_ratio {
+                (
+                    new_size.width,
+                    (new_size.width as f32 / self.target_aspect_ratio) as u32,
+                )
+            } else {
+                (
+                    (new_size.height as f32 * self.target_aspect_ratio) as u32,
+                    new_size.height,
+                )
+            };
+            self.size = winit::dpi::PhysicalSize::new(width, height);
+            self.config.width = width;
+            self.config.height = height;
             self.surface.configure(&self.device, &self.config);
-            self.ortographic_transform = Transform::from_matrix(Mat4::orthographic_rh(
-                0.0,
-                new_size.width as f32,
-                new_size.height as f32,
-                0.0,
-                -100.0,
-                100.0,
-            ));
         }
     }
 

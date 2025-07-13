@@ -183,12 +183,15 @@ impl ApplicationHandler for WebApp {
 
         container.append_child(&canvas).unwrap();
 
-        canvas.set_width(800);
-        canvas.set_height(600);
-        canvas.style().set_property("width", "800px").unwrap();
-        canvas.style().set_property("height", "600px").unwrap();
+        let status_div = document.get_element_by_id("status").unwrap();
+        status_div.set_text_content(Some("Loaded!"));
 
-        let _ = window.request_inner_size(winit::dpi::PhysicalSize::new(800u32, 600u32));
+        let (target_w, target_h) = Game::target_size();
+
+        //canvas.set_width(target_w);
+        //canvas.set_height(target_h);
+
+        //let _ = window.request_inner_size(winit::dpi::PhysicalSize::new(target_w, target_h));
 
         if let AppState::Loading {
             game,
@@ -204,7 +207,7 @@ impl ApplicationHandler for WebApp {
             let game_clone = Arc::clone(game);
             let audio_clone = Arc::clone(audio);
             wasm_bindgen_futures::spawn_local(async move {
-                let mut renderer = RenderingSystem::new(window.clone(), 800, 600).await;
+                let mut renderer = RenderingSystem::new(window.clone(), target_w, target_h).await;
                 let mut audio_system = AudioSystem::new();
                 let game = Game::init(&mut renderer, &mut audio_system);
 
