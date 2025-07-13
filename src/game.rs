@@ -46,6 +46,20 @@ impl PaddleState {
         })
     }
 
+    pub fn goal_local_space(&self, ortho_si: &Transform, is_player_a: bool) -> Transform {
+        let vertical_position = if is_player_a { 0.0 } else { 1.0 };
+
+        let vertical_range = 1.0 - PaddleState::PADDLE_HEIGHT;
+
+        let y = vertical_position * vertical_range;
+
+        ortho_si.translate(Vec3::new(0.0, y, 0.0)).scale(Vec3 {
+            x: 1.0,
+            y: PaddleState::PADDLE_HEIGHT,
+            z: 1.0,
+        })
+    }
+
     pub fn move_left(&mut self, delta_time: f32) {
         self.position -= PaddleState::PADDLE_SPEED * delta_time;
         if self.position < 0.0 {
@@ -129,6 +143,29 @@ impl Ball {
         .is_some()
         {
             self.velocity.y = -self.velocity.y; // Bounce off player B paddle
+        } else {
+            // Check if the ball is inside the goal area of either player
+            if Collision::do_spaces_collide(
+                &self.local_space(ortho_si),
+                &paddles.player_a.goal_local_space(ortho_si, true),
+            )
+            .is_some()
+            {
+                info!("Player B scores!");
+                self.position = Vec2::new(0.5, 0.5); // Reset ball position
+                self.velocity = Vec2::new(0.1, 0.1).normalize() * Ball::BALL_SPEED;
+            // Reset velocity
+            } else if Collision::do_spaces_collide(
+                &self.local_space(ortho_si),
+                &paddles.player_b.goal_local_space(ortho_si, false),
+            )
+            .is_some()
+            {
+                info!("Player A scores!");
+                self.position = Vec2::new(0.5, 0.5); // Reset ball position
+                self.velocity = Vec2::new(0.1, 0.1).normalize() * Ball::BALL_SPEED;
+                // Reset velocity
+            }
         }
     }
 
@@ -177,6 +214,7 @@ impl Game {
         drawer.clear_slow(Color::BLACK);
 
         let t = &Transform::ortographic_size_invariant();
+
         let (player_a_space, player_b_space) = self.paddles.local_spaces(t);
         drawer.draw_square_slow(Some(&player_a_space), Some(&EngineColor::RED));
         drawer.draw_square_slow(Some(&player_b_space), Some(&EngineColor::BLUE));
