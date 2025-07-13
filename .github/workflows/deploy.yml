@@ -43,7 +43,10 @@ jobs:
           ${{ runner.os }}-cargo-
 
     - name: Install Trunk
-      run: cargo install trunk
+      run: |
+        if ! command -v trunk &> /dev/null; then
+          cargo install trunk --locked
+        fi
 
     - name: Build with Trunk
       run: trunk build --release
